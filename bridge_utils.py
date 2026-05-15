@@ -1,6 +1,7 @@
 import os
 import struct
 import subprocess
+import platform
 
 # Dynamically populated set of specific MAC addresses (bytes) that we've seen
 # transmitting Nintendo Vendor IEs. This helps support 3DS/2DS consoles with
@@ -139,42 +140,61 @@ def setup_monitor_mode(iface):
     Needs root.
     """
     print(f"[*] Setting up monitor mode on {iface}...")
+    current_os = platform.system()
 
-    commands = [
-        # Kill processes that might interfere
-        ["airmon-ng", "check", "kill"],
-        # Bring interface down
-        ["ip", "link", "set", iface, "down"],
-        # Set monitor mode
-        ["iw", iface, "set", "type", "monitor"],
-        # Bring it back up
-        ["ip", "link", "set", iface, "up"],
-    ]
+    if current_os == "Windows":
 
-    for cmd in commands:
+        # Path to Npcap's WlanHelper utility
+        wlan_helper = r"C:\Windows\System32\Npcap\WlanHelper.exe"
+
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-            if result.returncode != 0 and cmd[0] != "airmon-ng":
-                print(
-                    f"[!] Warning: {' '.join(cmd)} returned {result.returncode}: {result.stderr.strip()}"
-                )
-        except FileNotFoundError:
-            if cmd[0] == "airmon-ng":
-                # airmon-ng is optional, fall through to iw-based setup
-                continue
-            print(f"[!] Command not found: {cmd[0]}")
-            return None
-        except subprocess.TimeoutExpired:
-            print(f"[!] Timeout running: {' '.join(cmd)}")
-            return None
+            check_cmd = [wlan_helper, iface, "mode"]
+            res = subprocess.run(check_cmd, capture_output=True, text=True, check=True)
+            print(f"[*] Current mode: {res.stdout.strip()}")
 
-    # Verify monitor mode is active
-    if check_injection_support(iface):
-        print(f"[+] Monitor mode active on {iface}")
-        return iface
-    else:
-        print(f"[!] Failed to verify monitor mode on {iface}")
-        return None
+            set_cmd = [wlan_helper, iface, "mode", "monitor"]
+            subprocess.run(set_cmd, capture_output=True, text=True)
+
+        except FileNotFoundError:
+            print("[!] Error: Npcap WlanHelper.exe not found.")
+            print("[!] Please install Npcap with 'Support raw 802.11 traffic'.")
+            return False
+    if current_os == "Linux":
+        commands = [
+            # Kill processes that might interfere
+            ["airmon-ng", "check", "kill"],
+            # Bring interface down
+            ["ip", "link", "set", iface, "down"],
+            # Set monitor mode
+            ["iw", iface, "set", "type", "monitor"],
+            # Bring it back up
+            ["ip", "link", "set", iface, "up"],
+        ]
+
+        for cmd in commands:
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+                if result.returncode != 0 and cmd[0] != "airmon-ng":
+                    print(
+                        f"[!] Warning: {' '.join(cmd)} returned {result.returncode}: {result.stderr.strip()}"
+                    )
+            except FileNotFoundError:
+                if cmd[0] == "airmon-ng":
+                    # airmon-ng is optional, fall through to iw-based setup
+                    continue
+                print(f"[!] Command not found: {cmd[0]}")
+                return None
+            except subprocess.TimeoutExpired:
+                print(f"[!] Timeout running: {' '.join(cmd)}")
+                return None
+
+        # Verify monitor mode is active
+        if check_injection_support(iface):
+            print(f"[+] Monitor mode active on {iface}")
+            return iface
+        else:
+            print(f"[!] Failed to verify monitor mode on {iface}")
+            return None
 
 
 def setup_virtual_monitor(parent_iface, vdev_name="mon0"):
